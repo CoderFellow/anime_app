@@ -1,0 +1,5 @@
+# ignoring the python virtual environment and test files
+venv/
+__pycache__/
+.env
+.pytest_cach/

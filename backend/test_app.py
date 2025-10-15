@@ -16,53 +16,52 @@ from app import app, db as _db # Assuming you import 'db' as '_db' in your test 
 
 # test_app.py
 
+# test_app.py
+
+# ... (Existing imports, ensure create_app and db are imported)
+from app import create_app, db as _db, Anime 
+# ...
+
 @pytest.fixture(scope='function')
-def client():
-    # 1. CRITICAL: Delete the old SQLAlchemy extension instance
-    if "sqlalchemy" in app.extensions:
-        del app.extensions["sqlalchemy"]
-        
+def app():
+    """Creates a fresh application and configures it for testing."""
+    # 1. Create a FRESH application instance
+    _app = create_app() 
+    
+    # 2. Configure it for testing, OVERRIDING the production config
     temp_dir = tempfile.mkdtemp()
-
-    # Configure the app for testing
-    app.config['TESTING'] = True
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:' # New database URI set
-    app.config['UPLOAD_FOLDER'] = temp_dir
+    _app.config.update({
+        'TESTING': True,
+        'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:', # Override DB to SQLite
+        'UPLOAD_FOLDER': temp_dir,
+        'SQLALCHEMY_BINDS': {}, # The fix you just implemented
+    })
     
-    # FIX THIS LINE: Must be an empty dict, not None
-    app.config['SQLALCHEMY_BINDS'] = {} # <--- CHANGE MADE HERE 🛠️
-
-    # 2. CRITICAL: Re-bind the db object with the new configuration
-    _db.init_app(app) 
+    # db.init_app is already run inside create_app
     
-    with app.app_context():
-        # Now, create_all will use the SQLite engine
-        _db.create_all()
+    with _app.app_context():
+        _db.create_all() # Create tables in the in-memory SQLite DB
 
-    # Create and yield the test client
+    yield _app
+
+    # Teardown: Clean up database and temp directory
+    with _app.app_context():
+        _db.drop_all()
+        
+    shutil.rmtree(temp_dir)
+
+
+@pytest.fixture(scope='function')
+def client(app): # Takes the clean app instance
+    """Provides the test client."""
     with app.test_client() as client:
         yield client
 
-    # Cleanup (keep this part)
-    with app.app_context():
-        _db.drop_all() 
-        
-    import shutil
-    shutil.rmtree(temp_dir)
-
 @pytest.fixture(scope='function')
-def db(client):
-	"""
-	Provides a clean database session for each test function.
-
-	args:
-		client: string
-
-	returns:
-		None
-	"""	
-	with app.app_context():
-		yield _db
+def db(app): # Takes the clean app instance
+    """Provides the database instance within the app context."""
+    with app.app_context():
+        yield _db
 
 def test_anime_model_creation(db, headers = AUTH_HEADERS):
 	"""
