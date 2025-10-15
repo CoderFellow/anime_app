@@ -5,68 +5,127 @@ from flask_httpauth import HTTPBasicAuth
 from sqlalchemy import or_
 import requests
 from file_service import save_uploaded_file, allowed_file
-
-# Initialize the Flask application
-app = Flask(__name__)
-
-# Configure the database URI
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///anime_records.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# Configure the directory where uploaded files will be saved
-UPLOAD_FOLDER = 'uploads'
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-# Configure the maximum file size (in bytes). Example: 500 MB
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+from dotenv import load_dotenv
 
 # Initialize the SQLAlchemy extension
-db = SQLAlchemy(app)
+db = SQLAlchemy()
 
 # Initialize Flask-HTTPAuth
 auth = HTTPBasicAuth()
 
 # Hardcoded user credentials for demonstration purposes
-USERS = {
-    "admin": "secret"
-}
+USERS = {"admin": "secret"}
 
-# Define a function to verify the username and password
+def create_app():
+	"""
+	This function creates the app object.
+
+	args:
+		None
+	
+	return:
+		app
+	"""
+	
+	# loading .env files
+	load_dotenv()
+
+	# Initialize the Flask application
+	app = Flask(__name__)
+
+	# Configure the database URI
+	app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+	app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+	app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER')
+	app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
+	app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+
+	# Create the upload directory if it doesn't exist
+	if not os.path.exists(app.config['UPLOAD_FOLDER']):
+		os.makedirs(app.config['UPLOAD_FOLDER'])
+		
+	db.init_app(app)
+	
+	return app
+	
+app = create_app()
+
 @auth.verify_password
 def verify_password(username, password):
+    """
+    this function verifies the password.
+    
+    args:
+        username: string
+        password: string
+        
+    returns:
+        condition  --> username: string
+        default    --> Nones
+    """
     if username in USERS and USERS[username] == password:
         return username
+    
     return None
 
 # Define a model (database table: Anime)
 class Anime(db.Model):
-    anime_id = db.Column(db.Integer, primary_key=True)
+    """
+    Defining the database model (database table: Anime)
+
+    args:
+        db: database model
+
+    returns:
+        string: query
+    """
+    anime_id = 	db.Column(db.Integer, primary_key=True)
     anime_title = db.Column(db.String(80), unique=True, nullable=False)
     anime_file_path = db.Column(db.String(140), unique=True, nullable=False)
     anime_description = db.Column(db.String(150), unique=False, nullable=True)
-
+    
     def __repr__(self):
         return f'<Anime {self.anime_title}>'
 
-# Create the database and tables within the application context
-with app.app_context():
-    db.create_all()
-
-# New function to add anime to the database
 def add_anime_to_db(anime_title, anime_file_path, anime_description):
+    """
+    This function adds anime to the database.
+
+    args:
+        anime_title: string
+        anime_file_path: string
+        anime_description: string
+    
+    returns:
+        new_anime: Anime class Object
+    """
+    # creating Anime class object
     new_anime = Anime(
         anime_title=anime_title,
         anime_file_path=anime_file_path,
         anime_description=anime_description
     )
+    
+    # adding anime to the db object database.
     db.session.add(new_anime)
+    
+    # finalizing the transaction.
     db.session.commit()
+    
+    # returns the new_anime object
     return new_anime
 
 # New function to search the database
 def search_anime_db(search_term):
+    """
+    This function searches the database.
+    
+    args:
+        search_term: string
+        
+    returns:
+        result: query, search results.
+    """
     result = Anime.query.filter(or_(
         Anime.anime_title.ilike(f"%{search_term}%"),
         Anime.anime_description.ilike(f"%{search_term}%")
@@ -80,6 +139,12 @@ def upload_anime():
     """
     This function handles the process of uploading anime files and saving
     their metadata to the database.
+    
+    args:
+        None
+        
+    returns:
+        None
     """
     # Check if the title was provided in the form data
     anime_title = request.form.get('anime_title')
@@ -117,24 +182,38 @@ def upload_anime():
         db.session.rollback()
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
-# Add a handler for the file size limit error
 @app.errorhandler(413)
 def request_entity_too_large(error):
+    """
+    Add a handler for the file size limit error.
+    
+    args:
+        error: string
+    
+    returns:
+        jsonify: json file
+        413: status_code
+    """
+    
     return jsonify({"error": "File size exceeds the 500 MB limit."}), 413
-
 # END: Modified upload endpoint for file validation and database function call
 
-# New route to get a list of all anime from the database
 @app.route('/api/anime', methods=['GET'])
 def get_anime_list():
     """
     This function retrieves a list of all anime entries from the database
     and returns them as a JSON response.
+    
+    args:
+        None
+
+    Returns:
+        None
     """
     try:
         # Query the database for all Anime records
         anime_list = Anime.query.all()
-        
+    
         # Serialize the list of objects into a list of dictionaries
         anime_data = [{
             "anime_id": anime.anime_id,
@@ -152,14 +231,24 @@ def get_anime_list():
 def search_anime():
     """
     This function handles searching for anime by title or description.
+
+    args:
+        None
+
+    Returns:
+        None
     """
+    # search term assumes the value of the attribute of value q.
     search_term = request.args.get('q')
 
     if not search_term:
         return jsonify({"error": "Bad Request: Search term is missing."}), 400
-
+	
+	# the search results variable stores a true or false value 
+	# returned from the function search_anime_db(search_term)
     search_results = search_anime_db(search_term)
-
+    
+    # there are no matching search results, it returns an error message.
     if not search_results:
         return jsonify({"message": "No matching anime found."}), 200
 
@@ -182,6 +271,17 @@ def get_anime_news():
     """
     This function retrieves the latest anime news from an external API
     and returns it to the client.
+    
+    agrs:
+        None
+
+    return:
+        try:
+            returns:
+                news_data: json file
+        except:
+            returns:
+                string: json file
     """
     try:
         response = requests.get("https://api.jikan.moe/v4/news")
@@ -198,6 +298,9 @@ def get_anime_news():
 
 if __name__ == '__main__':
     """
-    Main function that activates the app.py file.
+    Function that activates the app.py file.
     """
+    with app.app_context():
+        db.create_all()
+
     app.run(debug=True)
